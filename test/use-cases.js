@@ -14,7 +14,7 @@ var DB = 'DB';
 var PORT = 27017;
 
 
-describe('!mockgoose', function() {
+describe('mockgoose', function() {
     beforeEach(function() {
         mongoose = new Mongoose();
 
@@ -153,7 +153,7 @@ describe('!mockgoose', function() {
         });
 
         describe('after Mongoose#createConnection + Connection#open', function() {
-            it('finds nothing in the "real" database', function(done) {
+            it('gets a fresh empty database', function(done) {
                 var connection;
                 var cat;
 
