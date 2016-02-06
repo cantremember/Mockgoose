@@ -17,6 +17,7 @@ var mongod_emitter;
 module.exports = function(mongoose, db_opts) {
     var ConnectionPrototype = mongoose.Connection.prototype;
     var origOpen = ConnectionPrototype.open;
+console.log('***', origOpen.toString())
     var origOpenPrivate = ConnectionPrototype._open;
     var openCallList = [];
 
@@ -43,6 +44,7 @@ module.exports = function(mongoose, db_opts) {
 
     ConnectionPrototype._open = function() {
         if (mongod_emitter === undefined) {
+console.log('_o X')
             origOpenPrivate.apply(this, arguments);
             return;
         }
@@ -66,7 +68,7 @@ module.exports = function(mongoose, db_opts) {
 
                 if (! openCallList.some(function(_call) {
                     return _call.isConnected;
-                })) {
+                }) && (mongod_emitter !== undefined)) {
                     mongod_emitter.emit('mongoShutdown');
                 }
             });
@@ -121,6 +123,7 @@ module.exports = function(mongoose, db_opts) {
     }
 
     var orig_dbpath = db_opts.dbpath;
+
     function start_server(db_opts) {
         debug("attempting to start server on port: %d", db_opts.port);
         db_opts.dbpath = path.join(orig_dbpath, db_opts.port.toString());
@@ -143,22 +146,28 @@ module.exports = function(mongoose, db_opts) {
 
 
     module.exports.reset = function(done) {
+        if (! mongoose.isMocked) {
+console.log('r X')
+            return done(null);
+        }
+
         var collections = openCallList.reduce(function(total, call) {
             var objs = call.connection.collections;
-            Object.keys(objs).forEach(function(key) {
+            for (var key in objs) {
+console.log('r +', key)
                 total.push(objs[key]);
-            })
+            }
             return total;
         }, []);
 
         var remaining = collections.length;
-
         if (remaining === 0) {
-            done(null);
+            return done(null);
         }
 
         collections.forEach(function(obj) {
             obj.deleteMany(null, function() {
+console.log('r DM')
                 remaining--;
                 if (remaining === 0) {
                     done(null);
@@ -168,21 +177,31 @@ module.exports = function(mongoose, db_opts) {
     };
 
 	mongoose.unmock = function(callback) {
-        openCallList.forEach(function(call) {
-            call.connection.close();
-        });
-        mongod_emitter.once('mongoShutdown', function() {
-			delete mongoose.isMocked;
+        function restore() {
+            delete mongoose.isMocked;
 
             ConnectionPrototype.open = origOpen;
+console.log('V', ConnectionPrototype.open.toString())
             ConnectionPrototype._open = origOpenPrivate;
             openCallList = [];
 
-			emitter.removeAllListeners();
+console.log('v')
+            emitter.removeAllListeners();
+console.log('v')
             mongod_emitter = undefined;
+console.log('v')
 
-			callback();
-		});
+            callback && callback();
+        }
+
+        if ((! this.isMocked) || (openCallList.length === 0)) {
+            return restore();
+        }
+
+        openCallList.forEach(function(call) {
+            call.connection.close();
+        });
+        mongod_emitter.once('mongoShutdown', restore);
 	}
 
 	mongoose.unmockAndReconnect = function(callback) {
@@ -190,10 +209,15 @@ module.exports = function(mongoose, db_opts) {
         var remaining = openCallList.length;
 
 		mongoose.unmock(function() {
+console.log('|')
             if (remaining === 0) {
-                return callback();
+console.log("' x")
+                called = true;
+                callback && callback();
+                return;
             }
 
+console.log('|')
             var called = false;
             reconnectCallList.forEach(function(call, index) {
                 var connection = call.connection;
@@ -203,15 +227,19 @@ module.exports = function(mongoose, db_opts) {
                     args.push(cb);
                 }
 
+console.log('|', index)
                 args.push(function(err) {
+console.log('|', index)
                     debug('Mongoose reconnected %d', index);
 
                     remaining--;
                     if ((! called) && (err || (remaining === 0))) {
+console.log("'", index)
                         called = true;
-                        callback(err);
+                        callback && callback(err);
                     }
                 });
+console.log('|', connection.open.toString())
                 connection.open.apply(connection, args);
             });
 		});
