@@ -75,7 +75,7 @@ describe('!mockgoose', function() {
 
                 async.waterfall([
                     function(next) {
-                        connection = mongoose.createConnection()
+                        connection = mongoose.createConnection();
                         connection.open(HOST, DB, PORT, next);
                     },
                     function(next) {
@@ -159,7 +159,7 @@ describe('!mockgoose', function() {
 
                 async.waterfall([
                     function(next) {
-                        connection = mongoose.createConnection()
+                        connection = mongoose.createConnection();
                         connection.open(HOST, DB, PORT, next);
                     },
                     function(next) {
@@ -179,7 +179,7 @@ describe('!mockgoose', function() {
                     function(next) {
                         mockgoose(mongoose);
 
-                        connection = mongoose.createConnection()
+                        connection = mongoose.createConnection();
                         connection.open(HOST, DB, PORT, next);
                     },
                     function(next) {
@@ -248,7 +248,7 @@ describe('!mockgoose', function() {
 
                 async.waterfall([
                     function(next) {
-                        connection = mongoose.createConnection()
+                        connection = mongoose.createConnection();
                         connection.open(HOST, DB, PORT, next);
                     },
                     function(next) {
