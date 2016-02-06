@@ -12,13 +12,16 @@ var Cat;
 var HOST = '127.0.0.1'; // because `process.env.MOCKGOOSE_LIVE`
 var DB = 'DB';
 var PORT = 27017;
+var MOCK_OPTIONS = {
+    port: 27027
+};
 
 
 describe('mockgoose', function() {
     beforeEach(function() {
         mongoose = new Mongoose();
 
-        mockgoose(mongoose);
+        mockgoose(mongoose, MOCK_OPTIONS);
     });
 
     afterEach(function(done) {
@@ -132,7 +135,7 @@ describe('mockgoose', function() {
                         mongoose.unmock(next);
                     },
                     function(next) {
-                        mockgoose(mongoose);
+                        mockgoose(mongoose, MOCK_OPTIONS);
 
                         mongoose.connect(HOST, DB, PORT, next);
                     },
@@ -177,7 +180,7 @@ describe('mockgoose', function() {
                         mongoose.unmock(next);
                     },
                     function(next) {
-                        mockgoose(mongoose);
+                        mockgoose(mongoose, MOCK_OPTIONS);
 
                         connection = mongoose.createConnection();
                         connection.open(HOST, DB, PORT, next);
