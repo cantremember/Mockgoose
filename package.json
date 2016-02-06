@@ -1,7 +1,12 @@
 {
-  "name": "mockgoose",
+  "name": "@cantremember/mockgoose",
   "description": "Mockgoose is an in memory database mock to allow for testing of applications that rely on Mongoose.",
-  "version": "5.2.4",
+  "version": "5.3.0-alpha",
+  "private": false,
+  "publishConfig": {
+    "access": "public",
+    "scope": "cantremember"
+  },
   "author": {
     "name": "Anthony McCormick",
     "email": "anthony.mccormick AT gmail.com"
