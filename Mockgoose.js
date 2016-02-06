@@ -43,7 +43,6 @@ module.exports = function(mongoose, db_opts) {
 
     ConnectionPrototype._open = function() {
         if (mongod_emitter === undefined) {
-console.log('_o X')
             origOpenPrivate.apply(this, arguments);
             return;
         }
@@ -202,12 +201,11 @@ console.log('_o X')
 
 		mongoose.unmock(function() {
             if (remaining === 0) {
-                called = true;
                 callback && callback();
                 return;
             }
 
-            var called = false;
+            var anyError;
             reconnectCallList.forEach(function(call, index) {
                 var connection = call.connection;
                 var args = Array.prototype.slice.call(call.args);
@@ -219,12 +217,14 @@ console.log('_o X')
                 args.push(function(err) {
                     debug('Mongoose reconnected %d', index);
 
+                    anyError = anyError || err;
+
                     remaining--;
-                    if ((! called) && (err || (remaining === 0))) {
-                        called = true;
-                        callback && callback(err);
+                    if ((remaining === 0)) {
+                        callback && callback(anyError);
                     }
                 });
+
                 connection.open.apply(connection, args);
             });
 		});

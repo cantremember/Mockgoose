@@ -14,7 +14,7 @@ var sandbox = sinon.sandbox.create();
 var mongoose;
 
 var CONNECTION_BASE = { options: {} };
-var HOST = '127.0.0.1'; // because MOCKGOOSE_LIVE
+var HOST = '127.0.0.1'; // because `process.env.MOCKGOOSE_LIVE`
 var DB = 'DB';
 var DB2 = 'DB2';
 var PORT = 27017;
@@ -85,9 +85,11 @@ describe('mongoose.Connection', function() {
                     },
                     function(next) {
                         expect(openSpy.callCount).to.equal(1);
+                        // connect
                         expect(openSpy.args[0].slice(0, 3)).to.deep.equal(HOST_DB_PORT);
 
                         expect(openSpy.callCount).to.equal(1);
+                        // connect (+ mock)
                         expect(_openState[0]).to.deep.equal(MOCK_DB_PORT);
 
                         next();
@@ -110,10 +112,12 @@ describe('mongoose.Connection', function() {
                     },
                     function(next) {
                         expect(openSpy.callCount).to.equal(2);
+                        // connect
                         expect(openSpy.args[0].slice(0, 3)).to.deep.equal(HOST_DB_PORT);
                         expect(openSpy.args[1].slice(0, 3)).to.deep.equal(HOST_DB2_PORT);
 
                         expect(openSpy.callCount).to.equal(2);
+                        // connect (+ mock)
                         expect(_openState[0]).to.deep.equal(MOCK_DB_PORT);
                         expect(_openState[1]).to.deep.equal(MOCK_DB2_PORT);
 
@@ -124,66 +128,73 @@ describe('mongoose.Connection', function() {
         });
 
 
-        if ( process.env.MOCKGOOSE_LIVE ) {
-            describe('with a reconnect', function() {
-                it('reconnects a single call', function(done) {
-                    async.series([
-                        function(next) {
-                            connections.push(new Connection(CONNECTION_BASE));
-                            connections[0].open(HOST, DB, PORT, next);
-                        },
-                        function(next) {
-                            mongoose.unmockAndReconnect(next);
-                        },
-                        function(next) {
-                            expect(openSpy.callCount).to.equal(2);
-                            expect(openSpy.args[0].slice(0, 3)).to.deep.equal(HOST_DB_PORT);
-                            // reconnect
-                            expect(openSpy.args[1].slice(0, 3)).to.deep.equal(HOST_DB_PORT);
+        describe('with a reconnect', function() {
+            if (! process.env.MOCKGOOSE_LIVE) {
+                return;
+            }
 
-                            expect(openSpy.callCount).to.equal(2);
-                            expect(_openState[0]).to.deep.equal(MOCK_DB_PORT);
-                            // reconnect
-                            expect(_openState[1]).to.deep.equal(HOST_DB_PORT);
 
-                            next();
-                        },
-                    ], done);
-                });
+            it('reconnects a single call', function(done) {
+                async.series([
+                    function(next) {
+                        connections.push(new Connection(CONNECTION_BASE));
+                        connections[0].open(HOST, DB, PORT, next);
+                    },
+                    function(next) {
+                        mongoose.unmockAndReconnect(next);
+                    },
+                    function(next) {
+                        expect(openSpy.callCount).to.equal(2);
+                        // connect
+                        expect(openSpy.args[0].slice(0, 3)).to.deep.equal(HOST_DB_PORT);
+                        // reconnect
+                        expect(openSpy.args[1].slice(0, 3)).to.deep.equal(HOST_DB_PORT);
 
-                it('reconnects more than one call', function(done) {
-                    async.series([
-                        function(next) {
-                            connections.push(new Connection(CONNECTION_BASE));
-                            connections[0].open(HOST, DB, PORT, next);
-                        },
-                        function(next) {
-                            connections.push(new Connection(CONNECTION_BASE));
-                            connections[1].open(HOST, DB2, PORT, next);
-                        },
-                        function(next) {
-                            mongoose.unmockAndReconnect(next);
-                        },
-                        function(next) {
-                            expect(openSpy.callCount).to.equal(4);
-                            expect(openSpy.args[0].slice(0, 3)).to.deep.equal(HOST_DB_PORT);
-                            expect(openSpy.args[1].slice(0, 3)).to.deep.equal(HOST_DB2_PORT);
-                            // reconnect
-                            expect(openSpy.args[2].slice(0, 3)).to.deep.equal(HOST_DB_PORT);
-                            expect(openSpy.args[3].slice(0, 3)).to.deep.equal(HOST_DB2_PORT);
+                        expect(openSpy.callCount).to.equal(2);
+                        // connect (+ mock)
+                        expect(_openState[0]).to.deep.equal(MOCK_DB_PORT);
+                        // reconnect
+                        expect(_openState[1]).to.deep.equal(HOST_DB_PORT);
 
-                            expect(openSpy.callCount).to.equal(4);
-                            expect(_openState[0]).to.deep.equal(MOCK_DB_PORT);
-                            expect(_openState[1]).to.deep.equal(MOCK_DB2_PORT);
-                            // reconnect
-                            expect(_openState[2]).to.deep.equal(HOST_DB_PORT);
-                            expect(_openState[3]).to.deep.equal(HOST_DB2_PORT);
-
-                            next();
-                        },
-                    ], done);
-                });
+                        next();
+                    },
+                ], done);
             });
-        }
+
+            it('reconnects more than one call', function(done) {
+                async.series([
+                    function(next) {
+                        connections.push(new Connection(CONNECTION_BASE));
+                        connections[0].open(HOST, DB, PORT, next);
+                    },
+                    function(next) {
+                        connections.push(new Connection(CONNECTION_BASE));
+                        connections[1].open(HOST, DB2, PORT, next);
+                    },
+                    function(next) {
+                        mongoose.unmockAndReconnect(next);
+                    },
+                    function(next) {
+                        expect(openSpy.callCount).to.equal(4);
+                        // connect
+                        expect(openSpy.args[0].slice(0, 3)).to.deep.equal(HOST_DB_PORT);
+                        expect(openSpy.args[1].slice(0, 3)).to.deep.equal(HOST_DB2_PORT);
+                        // reconnect
+                        expect(openSpy.args[2].slice(0, 3)).to.deep.equal(HOST_DB_PORT);
+                        expect(openSpy.args[3].slice(0, 3)).to.deep.equal(HOST_DB2_PORT);
+
+                        expect(openSpy.callCount).to.equal(4);
+                        // connect (+ mock)
+                        expect(_openState[0]).to.deep.equal(MOCK_DB_PORT);
+                        expect(_openState[1]).to.deep.equal(MOCK_DB2_PORT);
+                        // reconnect
+                        expect(_openState[2]).to.deep.equal(HOST_DB_PORT);
+                        expect(_openState[3]).to.deep.equal(HOST_DB2_PORT);
+
+                        next();
+                    },
+                ], done);
+            });
+        });
     });
 });
