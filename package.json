@@ -19,7 +19,8 @@
     "in memory"
   ],
   "scripts": {
-    "test": "DEBUG=* mocha --timeout 3000 test"
+    "test": "DEBUG=mongodb*,Mockgoose mocha --timeout 3000 test",
+    "test-debug": "DEBUG=mongodb*,Mockgoose mocha debug --timeout 3000 test"
   },
   "main": "Mockgoose",
   "files": [
