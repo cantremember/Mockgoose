@@ -13,7 +13,7 @@ mockgoose(mongoose);
 before(function(done) {
     mongoose.connect('mongodb://127.0.0.1:27017/TestingDB', function(err) {
         done(err);
-    });
+    }); 
 });
 
 describe('User functions', function() {

@@ -12,6 +12,7 @@ var fs = require('fs');
 var debug = require('debug')('Mockgoose');
 var EventEmitter = require('events').EventEmitter;
 var emitter = new EventEmitter();
+var server_started = false;
 var mongod_emitter;
 
 module.exports = function(mongoose, db_opts) {
@@ -95,7 +96,7 @@ module.exports = function(mongoose, db_opts) {
     delete db_opts.version;
 
     if (! db_opts.storageEngine ) {
-        var parsed_version = db_version.split('.');
+        var parsed_version = db_version.split('.'); 
         if ( parsed_version[0] >= 3 && parsed_version[1] >= 2 ) {
             db_opts.storageEngine = "ephemeralForTest";
         } else {
@@ -121,7 +122,6 @@ module.exports = function(mongoose, db_opts) {
     }
 
     var orig_dbpath = db_opts.dbpath;
-
     function start_server(db_opts) {
         debug("attempting to start server on port: %d", db_opts.port);
         db_opts.dbpath = path.join(orig_dbpath, db_opts.port.toString());
@@ -141,7 +141,6 @@ module.exports = function(mongoose, db_opts) {
             }
         });
     }
-
 
     module.exports.reset = function(done) {
         if (! mongoose.isMocked) {
