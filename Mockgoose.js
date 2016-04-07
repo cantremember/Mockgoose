@@ -38,7 +38,11 @@ module.exports = function(mongoose, db_opts) {
         }
         if (mongod_emitter === undefined) {
             prepare_server(db_opts);
-            emitter.once("mongodbStarted", resume);
+
+            emitter.once("mongodbStarted", function() {
+              // arbitrary 0.1s to avoid "Error: connect ECONNREFUSED"
+              setTimeout(resume, 100);
+            });
         }
         else {
             resume();
