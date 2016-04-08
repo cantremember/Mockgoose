@@ -1,7 +1,7 @@
 {
   "name": "@cantremember/mockgoose",
   "description": "Mockgoose is an in memory database mock to allow for testing of applications that rely on Mongoose.",
-  "version": "5.3.0-delta",
+  "version": "5.3.0-gamma",
   "private": false,
   "publishConfig": {
     "access": "public",
