@@ -47,7 +47,9 @@ module.exports = function(mongoose, db_opts) {
                 // resume once the mock server has started
                 function resume() {
                     debug("proxying to original call");
-                    origMethod.apply(connection, args).then(resolve).catch(reject);
+
+                    var promise = origMethod.apply(connection, args);
+                    promise && promise.then(resolve).catch(reject);
                 }
 
                 if (server_started) {
@@ -252,14 +254,27 @@ module.exports = function(mongoose, db_opts) {
             callback && callback();
         }
 
-        if ((! this.isMocked) || (openCallList.length === 0)) {
+        if (! this.isMocked) {
             return restore();
         }
 
-        openCallList.forEach(function(call) {
-            call.connection.close();
+        var connected = openCallList.filter(function(call) {
+            var isConnected = call.isConnected;
+            if (isConnected) {
+                // no need to wait on a callback;
+                //    #on('disconnected') will do the trick
+                call.connection.close();
+            }
+            return isConnected;
         });
-        mongod_emitter.once('mongoShutdown', restore);
+
+        if (connected.length === 0) {
+            // we never managed to get anywhere
+            restore();
+        }
+        else {
+            mongod_emitter.once('mongoShutdown', restore);
+        }
 	}
 
 	mongoose.unmockAndReconnect = function(callback) {
@@ -276,6 +291,13 @@ module.exports = function(mongoose, db_opts) {
             reconnectCallList.forEach(function(call, index) {
                 var connection = call.connection;
                 var methodName = call.methodName;
+
+                if (methodName === 'openSet') {
+                    // undo the "single connection" fakery from _open
+                    delete connection.host;
+                    delete connection.port;
+                }
+
                 var args = Array.prototype.slice.call(call.args);
                 var cb = args.pop();
                 if (typeof cb !== 'function') {

@@ -22,6 +22,11 @@ var PORT = 27017;
 var DB = 'DB';
 var DB2 = 'DB2';
 
+var URI = 'mongodb://' + HOST + ':' + PORT;
+var OPTIONS = {
+    options: true
+};
+
 // assumed by Mockgoose
 var MONGOD_HOST = '127.0.0.1';
 
@@ -154,13 +159,16 @@ describe('mockgoose', function() {
 
 
     describe('unmock', function() {
-        var openSpy, _openSpy, closeSpy;
+        var openSpy, openSetSpy, _openSpy;
+        var closeSpy;
         var connections;
+
 
         beforeEach(function() {
             connections = [];
 
             openSpy = sandbox.spy(ConnectionPrototype, 'open');
+            openSetSpy = sandbox.spy(ConnectionPrototype, 'openSet');
             _openSpy = sandbox.spy(ConnectionPrototype, '_open');
             closeSpy = sandbox.spy(ConnectionPrototype, 'close');
 
@@ -169,6 +177,7 @@ describe('mockgoose', function() {
 
             expect(mongoose.isMocked).to.equal(true);
             expect(ConnectionPrototype.open).to.not.equal(openSpy);
+            expect(ConnectionPrototype.openSet).to.not.equal(openSetSpy);
             expect(ConnectionPrototype._open).to.not.equal(_openSpy);
         });
 
@@ -186,6 +195,7 @@ describe('mockgoose', function() {
                     // look!  back to normal
                     expect(mongoose.isMocked).to.equal(undefined);
                     expect(ConnectionPrototype.open).to.equal(openSpy);
+                    expect(ConnectionPrototype.openSet).to.equal(openSetSpy);
                     expect(ConnectionPrototype._open).to.equal(_openSpy);
 
                     expect(closeSpy.called).to.equal(false);
@@ -195,7 +205,7 @@ describe('mockgoose', function() {
             ], done);
         });
 
-        it('works with Connections', function(done) {
+        it('works with multiple Connection#open', function(done) {
             async.series([
                 function(next) {
                     connections.push(new Connection(CONNECTION_BASE));
@@ -217,8 +227,43 @@ describe('mockgoose', function() {
                 },
                 function(next) {
                     expect(openSpy.callCount).to.equal(2);
+                    expect(openSetSpy.callCount).to.equal(0);
                     expect(_openSpy.callCount).to.equal(2);
                     expect(closeSpy.callCount).to.equal(2);
+
+                    connections.forEach(function(connection) {
+                        expect(connection.readyState).to.equal(mongoose.STATES.disconnected);
+                    });
+
+                    next();
+                },
+            ], done);
+        });
+
+        it('works with Connection#openSet', function(done) {
+            async.series([
+                function(next) {
+                    connections.push(new Connection(CONNECTION_BASE));
+                    connections[0].openSet(URI, OPTIONS, next);
+                },
+                function(next) {
+                    connections.forEach(function(connection) {
+                        expect(connection.host).to.equal(MONGOD_HOST);
+                        // yet we can't be sure what port we're connected to
+
+                        // we pretend it's not a replSet
+                        expect(connection.replica).to.equal(false);
+
+                        expect(connection.readyState).to.equal(mongoose.STATES.connected);
+                    });
+
+                    mongoose.unmock(next);
+                },
+                function(next) {
+                    expect(openSpy.callCount).to.equal(0);
+                    expect(openSetSpy.callCount).to.equal(1);
+                    expect(_openSpy.callCount).to.equal(1);
+                    expect(closeSpy.callCount).to.equal(1);
 
                     connections.forEach(function(connection) {
                         expect(connection.readyState).to.equal(mongoose.STATES.disconnected);
@@ -258,15 +303,26 @@ describe('mockgoose', function() {
         }
 
 
-        var openSpy, _openSpy, closeSpy;
+        var openSpy, openSetSpy, _openSpy;
+        var closeSpy;
         var connections;
 
         beforeEach(function() {
             connections = [];
 
             openSpy = sandbox.spy(ConnectionPrototype, 'open');
+            openSetSpy = sandbox.spy(ConnectionPrototype, 'openSet');
             _openSpy = sandbox.spy(ConnectionPrototype, '_open');
             closeSpy = sandbox.spy(ConnectionPrototype, 'close');
+        });
+
+        afterEach(function(done) {
+            // close the "real" re-connections
+            async.parallel(connections.map(function(connection) {
+                return function(next) {
+                    connection.close(next);
+                };
+            }), done);
         });
 
 
@@ -288,9 +344,11 @@ describe('mockgoose', function() {
                     // look!  back to normal
                     expect(mongoose.isMocked).to.equal(undefined);
                     expect(ConnectionPrototype.open).to.equal(openSpy);
+                    expect(ConnectionPrototype.openSet).to.equal(openSetSpy);
                     expect(ConnectionPrototype._open).to.equal(_openSpy);
 
                     expect(openSpy.called).to.equal(false);
+                    expect(openSetSpy.called).to.equal(false);
                     expect(_openSpy.called).to.equal(false);
                     expect(closeSpy.called).to.equal(false);
 
@@ -299,7 +357,7 @@ describe('mockgoose', function() {
             ], done);
         });
 
-        it('works with Connections', function(done) {
+        it('works with multiple Connection#open', function(done) {
             mockgoose(mongoose);
 
             async.series([
@@ -323,6 +381,7 @@ describe('mockgoose', function() {
                 },
                 function(next) {
                     expect(openSpy.callCount).to.equal(4);
+                    expect(openSetSpy.callCount).to.equal(0);
                     expect(_openSpy.callCount).to.equal(4);
                     expect(closeSpy.callCount).to.equal(2);
 
@@ -337,13 +396,60 @@ describe('mockgoose', function() {
             ], done);
         });
 
+        it('works with Connection#openSet', function(done) {
+            if (! process.env.MOCKGOOSE_REPLSET) {
+                return;
+            }
+
+            mockgoose(mongoose);
+
+            async.series([
+                function(next) {
+                    connections.push(new Connection(CONNECTION_BASE));
+                    connections[0].openSet(URI, OPTIONS, next);
+                },
+                function(next) {
+                    connections.forEach(function(connection) {
+                        expect(connection.host).to.equal(MONGOD_HOST);
+                        // yet we can't be sure what port we're connected to
+
+                        // we pretend it's not a replSet
+                        expect(connection.replica).to.equal(false);
+
+                        expect(connection.readyState).to.equal(mongoose.STATES.connected);
+                    });
+
+                    mongoose.unmockAndReconnect(next);
+                },
+                function(next) {
+                    expect(openSpy.callCount).to.equal(0);
+                    expect(openSetSpy.callCount).to.equal(2);
+                    expect(_openSpy.callCount).to.equal(2);
+                    expect(closeSpy.callCount).to.equal(1);
+
+                    connections.forEach(function(connection) {
+                        expect(connection.host).to.equal(undefined);
+                        expect(connection.port).to.equal(undefined);
+
+                        expect(connection.hosts.length).to.equal(1);
+                        expect(connection.options.options).to.equal(true);
+                        expect(connection.replica).to.equal(true);
+
+                        expect(connection.readyState).to.equal(mongoose.STATES.connected);
+                    });
+
+                    next();
+                },
+            ], done);
+        });
+
         it('completes when Connections Error upon reconnect', function(done) {
             // we have non-standard plans for you ...
             openSpy.restore();
 
             var startThrowing;
             var originalOpen = ConnectionPrototype.open;
-            var openStub = sandbox.stub(ConnectionPrototype, 'open', function(
+            var originalOpenStub = sandbox.stub(ConnectionPrototype, 'open', function(
                 // yes, there are many call signatures in the Mongoose code,
                 //   but this is the only one we actually use below
                 host, db, port, cb
@@ -384,7 +490,8 @@ describe('mockgoose', function() {
                 expect(err.message).to.equal('thrown for ' + DB);
 
                 expect(openSpy.callCount).to.equal(0);
-                expect(openStub.callCount).to.equal(4);
+                expect(openSetSpy.callCount).to.equal(0);
+                expect(originalOpenStub.callCount).to.equal(4);
                 expect(_openSpy.callCount).to.equal(2);
                 expect(closeSpy.callCount).to.equal(2);
 
