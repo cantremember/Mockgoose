@@ -20,41 +20,62 @@ var MONGOD_PORT = 27017;
 
 module.exports = function(mongoose, db_opts) {
     var ConnectionPrototype = mongoose.Connection.prototype;
+    var PromiseProvider = mongoose.PromiseProvider;
+
     var origOpen = ConnectionPrototype.open;
+    var origOpenSet = ConnectionPrototype.openSet;
     var origOpenPrivate = ConnectionPrototype._open;
     var openCallList = [];
 
-    ConnectionPrototype.open = function() {
-        var connection = this;
-        var args = arguments;
-        openCallList.push({
-            connection: connection,
-            args: args,
-            isConnected: false,
-        });
-
-        function resume() {
-            origOpen.apply(connection, args);
-        }
-        if (mongod_emitter === undefined) {
-            prepare_server(db_opts);
-
-            emitter.once("mongodbStarted", function() {
-              // arbitrary 0.1s to avoid "Error: connect ECONNREFUSED"
-              setTimeout(resume, 100);
+    function openProxy(methodName, origMethod) {
+        return function() {
+            var connection = this;
+            var args = arguments;
+            openCallList.push({
+                connection: connection,
+                methodName: methodName,
+                args: args,
+                isConnected: false,
             });
-        }
-        else {
-            resume();
-        }
+
+            if (mongod_emitter === undefined) {
+                prepare_server(db_opts);
+            }
+
+            var Promise = PromiseProvider.get();
+            return new Promise.ES6(function(resolve, reject) {
+                // resume once the mock server has started
+                function resume() {
+                    debug("proxying to original call");
+                    origMethod.apply(connection, args).then(resolve).catch(reject);
+                }
+
+                if (server_started) {
+                    resume();
+                }
+                else {
+                    emitter.once("mongodbStarted", resume);
+                }
+            });
+        };
     }
+    ConnectionPrototype.open = openProxy('open', origOpen);
+    ConnectionPrototype.openSet = openProxy('openSet', origOpenSet);
 
     ConnectionPrototype._open = function() {
         if (mongod_emitter === undefined) {
-            origOpenPrivate.apply(this, arguments);
-            return;
+            // we are not actively mocking
+            return origOpenPrivate.apply(this, arguments);
         }
 
+        if (this.replica) {
+            // emulating replSet behavior is entirely too complicated
+            //     so we act as a single connection
+            this.replica = false;
+            this.hosts = null;
+        }
+
+        // this Connection should connect to the *mock server*
         this.host = db_opts.bind_ip;
         this.port = db_opts.port;
 
@@ -66,22 +87,30 @@ module.exports = function(mongoose, db_opts) {
 
             connection.once('connected', function() {
                 call.isConnected = true;
-                debug('Mongoose connected %d', index);
+                debug('Mongoose connected #%d', index);
             });
             connection.once('disconnected', function() {
                 call.isConnected = false;
-                debug('Mongoose disconnected %d', index);
+                debug('Mongoose disconnected #%d', index);
 
-                if (! openCallList.some(function(_call) {
+                var hasConnection = openCallList.some(function(_call) {
                     return _call.isConnected;
-                }) && (mongod_emitter !== undefined)) {
+                });
+                if ((! hasConnection) && (mongod_emitter !== undefined)) {
+                    // trigger a MongoDB shutdown when there are no active Connections
                     mongod_emitter.emit('mongoShutdown');
+
+                    setImmediate(function() {
+                        // we can't know when the *real* shutdown will complete
+                        //   but we know that our job here is done
+                        emitter.emit("mongodbStopped", db_opts);
+                    });
                 }
             });
             return true;
         });
 
-        origOpenPrivate.apply(this, arguments);
+        return origOpenPrivate.apply(this, arguments);
     }
 
 
@@ -89,6 +118,11 @@ module.exports = function(mongoose, db_opts) {
 
     emitter.once("mongodbStarted", function(db_opts) {
         debug("started server as %s:%d", db_opts.bind_ip, db_opts.port);
+        server_started = true;
+    });
+    emitter.once("mongodbStopped", function(db_opts) {
+        debug("stopped server as %s:%d", db_opts.bind_ip, db_opts.port);
+        server_started = false;
     });
 
     if (!db_opts) db_opts = {};
@@ -160,6 +194,7 @@ module.exports = function(mongoose, db_opts) {
         }
 
         mongod_emitter = mongod.start_server({args: db_opts, auto_shutdown: true}, function(err) {
+            // vs. `mongod_emitter.once('mongoStarted', function(err) { ... })`
             if (!err) {
                 emitter.emit('mongodbStarted', db_opts);
             } else {
@@ -202,11 +237,17 @@ module.exports = function(mongoose, db_opts) {
             delete mongoose.isMocked;
 
             ConnectionPrototype.open = origOpen;
+            ConnectionPrototype.openSet = origOpenSet;
             ConnectionPrototype._open = origOpenPrivate;
             openCallList = [];
 
             emitter.removeAllListeners();
-            mongod_emitter = undefined;
+
+            if (mongod_emitter !== undefined) {
+                mongod_emitter.removeAllListeners();
+                mongod_emitter = undefined;
+            }
+            server_started = false;
 
             callback && callback();
         }
@@ -234,6 +275,7 @@ module.exports = function(mongoose, db_opts) {
             var anyError;
             reconnectCallList.forEach(function(call, index) {
                 var connection = call.connection;
+                var methodName = call.methodName;
                 var args = Array.prototype.slice.call(call.args);
                 var cb = args.pop();
                 if (typeof cb !== 'function') {
@@ -241,7 +283,7 @@ module.exports = function(mongoose, db_opts) {
                 }
 
                 args.push(function(err) {
-                    debug('Mongoose reconnected %d', index);
+                    debug('Mongoose reconnected #%d', index);
 
                     anyError = anyError || err;
 
@@ -251,7 +293,7 @@ module.exports = function(mongoose, db_opts) {
                     }
                 });
 
-                connection.open.apply(connection, args);
+                connection[methodName].apply(connection, args);
             });
 		});
 	}
