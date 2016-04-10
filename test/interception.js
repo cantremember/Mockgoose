@@ -120,7 +120,7 @@ describe('mongoose.Connection', function() {
                 ], done);
             });
 
-            it.only('fakes out more than one call', function(done) {
+            it('fakes out more than one call', function(done) {
                 async.series([
                     function(next) {
                         // 2 in parallel

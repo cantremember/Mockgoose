@@ -13,6 +13,7 @@ var portfinder = require('portfinder');
 var debug = require('debug')('Mockgoose');
 var EventEmitter = require('events').EventEmitter;
 var emitter = new EventEmitter();
+var server_preparing = false;
 var server_started = false;
 var mongod_emitter;
 var MONGOD_HOST = '127.0.0.1';
@@ -38,9 +39,7 @@ module.exports = function(mongoose, db_opts) {
                 isConnected: false,
             });
 
-            if (mongod_emitter === undefined) {
-                prepare_server(db_opts);
-            }
+            prepare_server(db_opts);
 
             var Promise = PromiseProvider.get();
             return new Promise.ES6(function(resolve, reject) {
@@ -65,7 +64,7 @@ module.exports = function(mongoose, db_opts) {
     ConnectionPrototype.openSet = openProxy('openSet', origOpenSet);
 
     ConnectionPrototype._open = function() {
-        if (mongod_emitter === undefined) {
+        if (! server_started) {
             // we are not actively mocking
             return origOpenPrivate.apply(this, arguments);
         }
@@ -82,9 +81,9 @@ module.exports = function(mongoose, db_opts) {
         this.port = db_opts.port;
 
         var connection = this;
-        openCallList.filter(function(call, index) {
+        openCallList.forEach(function(call, index) {
             if (call.connection !== connection) {
-                return false;
+                return;
             }
 
             connection.once('connected', function() {
@@ -95,10 +94,10 @@ module.exports = function(mongoose, db_opts) {
                 call.isConnected = false;
                 debug('Mongoose disconnected #%d', index);
 
-                var hasConnection = openCallList.some(function(_call) {
+                var anyConnected = openCallList.some(function(_call) {
                     return _call.isConnected;
                 });
-                if ((! hasConnection) && (mongod_emitter !== undefined)) {
+                if ((! anyConnected) && (mongod_emitter !== undefined)) {
                     // trigger a MongoDB shutdown when there are no active Connections
                     mongod_emitter.emit('mongoShutdown');
 
@@ -109,7 +108,6 @@ module.exports = function(mongoose, db_opts) {
                     });
                 }
             });
-            return true;
         });
 
         return origOpenPrivate.apply(this, arguments);
@@ -169,6 +167,14 @@ module.exports = function(mongoose, db_opts) {
     }
 
     function prepare_server(db_opts) {
+      // "preparing" happens before a successful "launch"
+      //   we only need to do the preparation once
+      if ((server_preparing) || (mongod_emitter !== undefined)) {
+console.log('ATTEMPT TO RELAUNCH')
+          return;
+      }
+      server_preparing = true;
+
       debug("identifying available port, base = %s:%d", db_opts.bind_ip, db_opts.port);
 
       portfinder.getPort({
@@ -195,6 +201,8 @@ module.exports = function(mongoose, db_opts) {
             if (e.code !== "EEXIST" ) throw e;
         }
 
+        // no longer preparing, now launching
+        server_preparing = false;
         mongod_emitter = mongod.start_server({args: db_opts, auto_shutdown: true}, function(err) {
             // vs. `mongod_emitter.once('mongoStarted', function(err) { ... })`
             if (!err) {
@@ -249,6 +257,7 @@ module.exports = function(mongoose, db_opts) {
                 mongod_emitter.removeAllListeners();
                 mongod_emitter = undefined;
             }
+            server_preparing = false;
             server_started = false;
 
             callback && callback();
