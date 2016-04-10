@@ -25,7 +25,7 @@ var DB2 = 'DB2';
 var USER_HOST_DB_PORT = [ HOST, DB, PORT ];
 var USER_HOST_DB2_PORT = [ HOST, DB2, PORT ];
 
-var URI = 'mongodb://' + HOST + ':' + PORT;
+var URI = 'mongodb://' + HOST + ':' + PORT + '/' + DB;
 var OPTIONS = {
     options: true
 };
@@ -115,6 +115,14 @@ describe('mongoose.Connection', function() {
                         //   yet we can't be sure what port we're connected to
                         expect(_openState[0].slice(0, 2)).to.deep.equal(MONGOD_HOST_DB);
 
+                        // the Connection has the mock host:port + requested db
+                        var connection = connections[0];
+                        var mockHost = _openState[0][0];
+                        var mockPort = _openState[0][2];
+                        expect(connection.host).to.equal(mockHost);
+                        expect(connection.port).to.equal(mockPort);
+                        expect(connection.name).to.equal(DB);
+
                         next();
                     },
                 ], done);
@@ -162,6 +170,14 @@ describe('mongoose.Connection', function() {
                         expect(_openState[2].slice(0, 2)).to.deep.equal(MONGOD_HOST_DB2);
                         //   but it's the same port for both
                         expect(_openState[0][2]).to.equal(_openState[2][2]);
+
+                        // all Connections shared the same mongod instance
+                        var mockHost = _openState[0][0];
+                        var mockPort = _openState[0][2];
+                        connections.forEach(function(connection) {
+                            expect(connection.host).to.equal(mockHost);
+                            expect(connection.port).to.equal(mockPort);
+                        });
 
                         next();
                     },
@@ -273,6 +289,12 @@ describe('mongoose.Connection', function() {
                         // reconnect
                         expect(_openState[1]).to.deep.equal(USER_HOST_DB_PORT);
 
+                        // the Connection has the requested host:port/db
+                        var connection = connections[0];
+                        expect(connection.host).to.equal(HOST);
+                        expect(connection.port).to.equal(PORT);
+                        expect(connection.name).to.equal(DB);
+
                         next();
                     },
                 ], done);
@@ -355,6 +377,15 @@ describe('mongoose.Connection', function() {
                         expect(openSetStub.args[0].slice(0, 2)).to.deep.equal(USER_URI_OPTIONS);
 
                         expect(_openSpy.callCount).to.equal(1);
+
+                        // the Connection has the mock host
+                        //   this Test Case doesn't consider the port
+                        expect(connection.host).to.equal(MONGOD_HOST);
+                        expect(connection.name).to.equal(DB);
+
+                        // and it's *not* connected as a replSet
+                        expect(connection.replica).to.equal(false);
+                        expect(connection.hosts).to.equal(null);
 
                         next();
                     },
@@ -461,6 +492,14 @@ describe('mongoose.Connection', function() {
                         expect(openSetStub.args[1].slice(0, 2)).to.deep.equal(USER_URI_OPTIONS);
 
                         expect(_openSpy.callCount).to.equal(2);
+
+                        // the Connection has the requested host:port/db
+                        expect(connection.host).to.equal(MONGOD_HOST);
+                        expect(connection.name).to.equal(DB);
+
+                        // and it *is* connected as a replSet
+                        expect(connection.replica).to.equal(true);
+                        expect(connection.hosts).to.be.instanceOf('Array');
 
                         next();
                     },
