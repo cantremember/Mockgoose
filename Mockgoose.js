@@ -45,7 +45,7 @@ module.exports = function(mongoose, db_opts) {
             return new Promise.ES6(function(resolve, reject) {
                 // resume once the mock server has started
                 function resume() {
-                    debug('proxying to original call, will use %s:%d', db_opts.bind_ip, db_opts.port);
+                    debug("proxying to original call");
 
                     var promise = origMethod.apply(connection, args);
                     promise && promise.then(resolve).catch(reject);
@@ -55,10 +55,7 @@ module.exports = function(mongoose, db_opts) {
                     resume();
                 }
                 else {
-                    emitter.once("mongodbStarted", function(_db_opts) {
-                        debug('notified of start %s:%d', _db_opts.bind_ip, _db_opts.port);
-                        resume();
-                    });
+                    emitter.once("mongodbStarted", resume);
                 }
             });
         };
@@ -91,11 +88,11 @@ module.exports = function(mongoose, db_opts) {
 
             connection.once('connected', function() {
                 call.isConnected = true;
-                debug('Mongoose connected #%d - %s:%d', index, db_opts.bind_ip, db_opts.port);
+                debug('Mongoose connected #%d', index);
             });
             connection.once('disconnected', function() {
                 call.isConnected = false;
-                debug('Mongoose disconnected #%d - %s:%d', index, db_opts.bind_ip, db_opts.port);
+                debug('Mongoose disconnected #%d', index);
 
                 var anyConnected = openCallList.some(function(_call) {
                     return _call.isConnected;
@@ -170,9 +167,10 @@ module.exports = function(mongoose, db_opts) {
     }
 
     function prepare_server(db_opts) {
-      // only prepare once,
-      //   which is differentiated that from "already executing"
+      // "preparing" happens before a successful "launch"
+      //   we only need to do the preparation once
       if ((server_preparing) || (mongod_emitter !== undefined)) {
+console.log('ATTEMPT TO RELAUNCH')
           return;
       }
       server_preparing = true;
