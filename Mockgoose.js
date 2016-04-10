@@ -170,7 +170,6 @@ module.exports = function(mongoose, db_opts) {
       // "preparing" happens before a successful "launch"
       //   we only need to do the preparation once
       if ((server_preparing) || (mongod_emitter !== undefined)) {
-console.log('ATTEMPT TO RELAUNCH')
           return;
       }
       server_preparing = true;
