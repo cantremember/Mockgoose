@@ -13,11 +13,15 @@ var portfinder = require('portfinder');
 var debug = require('debug')('Mockgoose');
 var EventEmitter = require('events').EventEmitter;
 var emitter = new EventEmitter();
+
 var server_preparing = false;
 var server_started = false;
 var mongod_emitter;
+var mongod_opts;
+
 var MONGOD_HOST = '127.0.0.1';
 var MONGOD_PORT = 27017;
+
 
 module.exports = function(mongoose, db_opts) {
     var ConnectionPrototype = mongoose.Connection.prototype;
@@ -39,9 +43,32 @@ module.exports = function(mongoose, db_opts) {
                 isConnected: false,
             });
 
-            prepare_server(db_opts);
+            prepare_server();
 
-            var Promise = PromiseProvider.get();
+            // are we being invoked in callback-style?
+            var cb = args[args.length - 1];
+            if (typeof cb === 'function') {
+                var resume = function() {
+                    debug("proxying to original call");
+
+                    origMethod.apply(connection, args);
+                }
+
+                if (server_started) {
+                    resume();
+                }
+                else {
+                    emitter.once("mongodbStarted", resume);
+                }
+
+                return;
+            }
+
+            var Promise = PromiseProvider && PromiseProvider.get();
+            if (! Promise) {
+              throw new Error('`mongoose` provides no Promises');
+            }
+
             return new Promise.ES6(function(resolve, reject) {
                 // resume once the mock server has started
                 function resume() {
@@ -77,8 +104,8 @@ module.exports = function(mongoose, db_opts) {
         }
 
         // this Connection should connect to the *mock server*
-        this.host = db_opts.bind_ip;
-        this.port = db_opts.port;
+        this.host = mongod_opts.bind_ip;
+        this.port = mongod_opts.port;
 
         var connection = this;
         openCallList.forEach(function(call, index) {
@@ -104,7 +131,7 @@ module.exports = function(mongoose, db_opts) {
                     setImmediate(function() {
                         // we can't know when the *real* shutdown will complete
                         //   but we know that our job here is done
-                        emitter.emit("mongodbStopped", db_opts);
+                        emitter.emit("mongodbStopped", mongod_opts);
                     });
                 }
             });
@@ -116,57 +143,60 @@ module.exports = function(mongoose, db_opts) {
 
     mongoose.isMocked = true;
 
-    emitter.once("mongodbStarted", function(db_opts) {
-        debug("started server as %s:%d", db_opts.bind_ip, db_opts.port);
+    emitter.once("mongodbStarted", function() {
+        debug("started server as %s:%d", mongod_opts.bind_ip, mongod_opts.port);
         server_started = true;
     });
-    emitter.once("mongodbStopped", function(db_opts) {
-        debug("stopped server as %s:%d", db_opts.bind_ip, db_opts.port);
+    emitter.once("mongodbStopped", function() {
+        debug("stopped server as %s:%d", mongod_opts.bind_ip, mongod_opts.port);
         server_started = false;
     });
 
-    if (!db_opts) db_opts = {};
+    // NOTE:  if you mock multiple instances of Mongoose,
+    //   only one global singleton mock server gets started (for efficiency's sake),
+    //   and it uses the `db_opts` from the first `mockgoose(...)` call
+    mongod_opts = mongod_opts || db_opts || {};
 
     var db_version;
-    if (! db_opts.version ) {
+    if (! mongod_opts.version ) {
         db_version = mongod.active_version();
     } else {
-        db_version = db_opts.version;
+        db_version = mongod_opts.version;
     }
 
-    delete db_opts.version;
+    delete mongod_opts.version;
 
-    if (! db_opts.storageEngine ) {
+    if (! mongod_opts.storageEngine ) {
         var parsed_version = db_version.split('.');
         if ( parsed_version[0] >= 3 && parsed_version[1] >= 2 ) {
-            db_opts.storageEngine = "ephemeralForTest";
+            mongod_opts.storageEngine = "ephemeralForTest";
         } else {
-            db_opts.storageEngine = "inMemoryExperiment";
+            mongod_opts.storageEngine = "inMemoryExperiment";
         }
     }
 
-    if (! db_opts.bind_ip ) {
-        db_opts.bind_ip = MONGOD_HOST;
+    if (! mongod_opts.bind_ip ) {
+        mongod_opts.bind_ip = MONGOD_HOST;
     }
 
-    if (! db_opts.port ) {
-        db_opts.port = MONGOD_PORT;
+    if (! mongod_opts.port ) {
+        mongod_opts.port = MONGOD_PORT;
     } else {
-        db_opts.port = Number(db_opts.port);
+        mongod_opts.port = Number(mongod_opts.port);
     }
 
-    if (! db_opts.dbpath ) {
-        db_opts.dbpath = path.join(__dirname, ".mongooseTempDB");
-        debug("dbpath: %s", db_opts.dbpath);
+    if (! mongod_opts.dbpath ) {
+        mongod_opts.dbpath = path.join(__dirname, ".mongooseTempDB");
+        debug("dbpath: %s", mongod_opts.dbpath);
     }
 
     try {
-        fs.mkdirSync(db_opts.dbpath);
+        fs.mkdirSync(mongod_opts.dbpath);
     } catch (e) {
         if (e.code !== "EEXIST" ) throw e;
     }
 
-    function prepare_server(db_opts) {
+    function prepare_server() {
       // "preparing" happens before a successful "launch"
       //   we only need to do the preparation once
       if ((server_preparing) || (mongod_emitter !== undefined)) {
@@ -174,41 +204,41 @@ module.exports = function(mongoose, db_opts) {
       }
       server_preparing = true;
 
-      debug("identifying available port, base = %s:%d", db_opts.bind_ip, db_opts.port);
+      debug("identifying available port, base = %s:%d", mongod_opts.bind_ip, mongod_opts.port);
 
       portfinder.getPort({
-        host: db_opts.bind_ip,
-        port: db_opts.port,
+        host: mongod_opts.bind_ip,
+        port: mongod_opts.port,
       }, function(err, freePort) {
         if (err) {
           throw err;
         }
 
-        db_opts.port = freePort;
-        start_server(db_opts);
+        mongod_opts.port = freePort;
+        start_server();
       });
     }
 
-    var orig_dbpath = db_opts.dbpath;
-    function start_server(db_opts) {
-        debug("attempting to start server as %s:%d", db_opts.bind_ip, db_opts.port);
-        db_opts.dbpath = path.join(orig_dbpath, db_opts.port.toString());
+    var orig_dbpath = mongod_opts.dbpath;
+    function start_server() {
+        debug("attempting to start server as %s:%d", mongod_opts.bind_ip, mongod_opts.port);
+        mongod_opts.dbpath = path.join(orig_dbpath, mongod_opts.port.toString());
 
         try {
-            fs.mkdirSync(db_opts.dbpath);
+            fs.mkdirSync(mongod_opts.dbpath);
         } catch (e) {
             if (e.code !== "EEXIST" ) throw e;
         }
 
         // no longer preparing, now launching
         server_preparing = false;
-        mongod_emitter = mongod.start_server({args: db_opts, auto_shutdown: true}, function(err) {
+        mongod_emitter = mongod.start_server({args: mongod_opts, auto_shutdown: true}, function(err) {
             // vs. `mongod_emitter.once('mongoStarted', function(err) { ... })`
             if (!err) {
-                emitter.emit('mongodbStarted', db_opts);
+                emitter.emit('mongodbStarted', mongod_opts);
             } else {
-                db_opts.port++;
-                start_server(db_opts);
+                mongod_opts.port++;
+                start_server();
             }
         });
     }
@@ -232,16 +262,22 @@ module.exports = function(mongoose, db_opts) {
         }
 
         collections.forEach(function(obj) {
-            obj.deleteMany(null, function() {
+            function onReset() {
                 remaining--;
                 if (remaining === 0) {
                     done(null);
                 }
-            });
+            }
+            if (typeof obj.deleteMany === 'function') {
+              obj.deleteMany(null, onReset);
+            }
+            else {
+              obj.remove({}, onReset);
+            }
         });
     };
 
-	mongoose.unmock = function(callback) {
+      mongoose.unmock = function(callback) {
         function restore() {
             delete mongoose.isMocked;
 
@@ -267,29 +303,31 @@ module.exports = function(mongoose, db_opts) {
         }
 
         var connected = openCallList.filter(function(call) {
-            var isConnected = call.isConnected;
-            if (isConnected) {
-                // no need to wait on a callback;
-                //    #on('disconnected') will do the trick
-                call.connection.close();
-            }
-            return isConnected;
+          return call.isConnected;
         });
 
         if (connected.length === 0) {
             // we never managed to get anywhere
             restore();
+            return;
         }
-        else {
-            mongod_emitter.once('mongoShutdown', restore);
-        }
-	}
 
-	mongoose.unmockAndReconnect = function(callback) {
+        // *before* we start #close's, which may appear synchronous
+        mongod_emitter.once('mongoShutdown', restore);
+
+        connected.forEach(function(call) {
+            // no need to wait on a callback;
+            //    #on('disconnected') will do the trick
+            //    and ultimately trigger 'mongoShutdown'
+            call.connection.close();
+        });
+    }
+
+    mongoose.unmockAndReconnect = function(callback) {
         var reconnectCallList = openCallList;
         var remaining = openCallList.length;
 
-		mongoose.unmock(function() {
+            mongoose.unmock(function() {
             if (remaining === 0) {
                 callback && callback();
                 return;
@@ -325,8 +363,8 @@ module.exports = function(mongoose, db_opts) {
 
                 connection[methodName].apply(connection, args);
             });
-		});
-	}
+        });
+    }
 
 
     return emitter;
