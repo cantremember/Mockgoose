@@ -45,7 +45,30 @@ module.exports = function(mongoose, db_opts) {
 
             prepare_server();
 
-            var Promise = PromiseProvider.get();
+            // are we being invoked in callback-style?
+            var cb = args[args.length - 1];
+            if (typeof cb === 'function') {
+                var resume = function() {
+                    debug("proxying to original call");
+
+                    origMethod.apply(connection, args);
+                }
+
+                if (server_started) {
+                    resume();
+                }
+                else {
+                    emitter.once("mongodbStarted", resume);
+                }
+
+                return;
+            }
+
+            var Promise = PromiseProvider && PromiseProvider.get();
+            if (! Promise) {
+              throw new Error('`mongoose` provides no Promises');
+            }
+
             return new Promise.ES6(function(resolve, reject) {
                 // resume once the mock server has started
                 function resume() {
@@ -239,16 +262,22 @@ module.exports = function(mongoose, db_opts) {
         }
 
         collections.forEach(function(obj) {
-            obj.deleteMany(null, function() {
+            function onReset() {
                 remaining--;
                 if (remaining === 0) {
                     done(null);
                 }
-            });
+            }
+            if (typeof obj.deleteMany === 'function') {
+              obj.deleteMany(null, onReset);
+            }
+            else {
+              obj.remove({}, onReset);
+            }
         });
     };
 
-	mongoose.unmock = function(callback) {
+      mongoose.unmock = function(callback) {
         function restore() {
             delete mongoose.isMocked;
 
@@ -274,29 +303,31 @@ module.exports = function(mongoose, db_opts) {
         }
 
         var connected = openCallList.filter(function(call) {
-            var isConnected = call.isConnected;
-            if (isConnected) {
-                // no need to wait on a callback;
-                //    #on('disconnected') will do the trick
-                call.connection.close();
-            }
-            return isConnected;
+          return call.isConnected;
         });
 
         if (connected.length === 0) {
             // we never managed to get anywhere
             restore();
+            return;
         }
-        else {
-            mongod_emitter.once('mongoShutdown', restore);
-        }
-	}
 
-	mongoose.unmockAndReconnect = function(callback) {
+        // *before* we start #close's, which may appear synchronous
+        mongod_emitter.once('mongoShutdown', restore);
+
+        connected.forEach(function(call) {
+            // no need to wait on a callback;
+            //    #on('disconnected') will do the trick
+            //    and ultimately trigger 'mongoShutdown'
+            call.connection.close();
+        });
+    }
+
+    mongoose.unmockAndReconnect = function(callback) {
         var reconnectCallList = openCallList;
         var remaining = openCallList.length;
 
-		mongoose.unmock(function() {
+            mongoose.unmock(function() {
             if (remaining === 0) {
                 callback && callback();
                 return;
@@ -332,8 +363,8 @@ module.exports = function(mongoose, db_opts) {
 
                 connection[methodName].apply(connection, args);
             });
-		});
-	}
+        });
+    }
 
 
     return emitter;
