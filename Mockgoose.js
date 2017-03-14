@@ -14,10 +14,12 @@ var debug = require('debug')('Mockgoose');
 var EventEmitter = require('events').EventEmitter;
 var emitter = new EventEmitter();
 
+// shared singleton-ish state
 var server_preparing = false;
 var server_started = false;
 var mongod_emitter;
 var mongod_opts;
+var openCallList = [];
 
 var MONGOD_HOST = '127.0.0.1';
 var MONGOD_PORT = 27017;
@@ -30,7 +32,6 @@ module.exports = function(mongoose, db_opts) {
     var origOpen = ConnectionPrototype.open;
     var origOpenSet = ConnectionPrototype.openSet;
     var origOpenPrivate = ConnectionPrototype._open;
-    var openCallList = [];
 
     function openProxy(methodName, origMethod) {
         return function() {
@@ -284,7 +285,7 @@ module.exports = function(mongoose, db_opts) {
             ConnectionPrototype.open = origOpen;
             ConnectionPrototype.openSet = origOpenSet;
             ConnectionPrototype._open = origOpenPrivate;
-            openCallList = [];
+            openCallList.length = 0;
 
             emitter.removeAllListeners();
 
